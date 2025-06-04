@@ -1,4 +1,3 @@
-const { grabScreenshot } = window.bridge;
 const world = document.getElementById('world');
 const viewport = document.getElementById('viewport');
 const urlInput = document.getElementById('urlInput');
@@ -174,13 +173,8 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
     webview.setAttribute('style', `width: ${width}px; height: ${height}px; position: absolute; top: 30px; left: 0;`);
   };
   
-  // Create screenshot image
-  const screenshot = document.createElement('img');
-  screenshot.style.display = 'none';
-  
   tile.appendChild(header);
   tile.appendChild(webview);
-  tile.appendChild(screenshot);
   
   // Set initial dimensions
   setTimeout(updateWebviewDimensions, 0);
@@ -232,41 +226,9 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
   
   console.log('Event listeners attached to webview');
   
-  webview.addEventListener('focus', () => {
-    screenshot.style.display = 'none';
-    webview.style.display = 'block';
-    selectTile(tile);
-  });
-  
-  webview.addEventListener('blur', async () => {
-    try {
-      const webContentsId = webview.getWebContentsId();
-      const png = await grabScreenshot(webContentsId);
-      if (png) {
-        screenshot.src = png;
-        screenshot.style.display = 'block';
-        webview.style.display = 'none';
-      }
-    } catch (error) {
-      console.error('Screenshot failed:', error);
-    }
-  });
-  
-  // Add click handler for selection and webview focusing
-  tile.addEventListener('mousedown', (e) => {
-    if (e.target === tile || e.target === screenshot) {
-      selectTile(tile);
-      // Focus the webview to enable interaction
-      const webview = tile.querySelector('webview');
-      if (webview) {
-        webview.focus();
-      }
-    }
-  });
   
   world.appendChild(tile);
   makeDraggable(tile);
-  selectTile(tile);
   
   // Save state after creating new tile (but not when loading saved tiles)
   if (!savedData) {
@@ -299,8 +261,12 @@ function makeDraggable(target) {
       allowFrom: '.tile-header', // Only allow dragging from header
       listeners: {
         move(event) {
-          const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
-          const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+          // Adjust for zoom scale
+          const scaledDx = event.dx / scale;
+          const scaledDy = event.dy / scale;
+          
+          const x = (parseFloat(target.getAttribute('data-x')) || 0) + scaledDx;
+          const y = (parseFloat(target.getAttribute('data-y')) || 0) + scaledDy;
           
           target.style.transform = `translate(${x}px, ${y}px)`;
           target.setAttribute('data-x', x);
@@ -315,13 +281,19 @@ function makeDraggable(target) {
       edges: { right: true, bottom: true }, // Only bottom-right corner
       listeners: {
         move(event) {
+          // Adjust for zoom scale
+          const scaledDeltaLeft = event.deltaRect.left / scale;
+          const scaledDeltaTop = event.deltaRect.top / scale;
+          const scaledWidth = event.rect.width / scale;
+          const scaledHeight = event.rect.height / scale;
+          
           let { x, y } = event.target.dataset;
-          x = (parseFloat(x) || 0) + event.deltaRect.left;
-          y = (parseFloat(y) || 0) + event.deltaRect.top;
+          x = (parseFloat(x) || 0) + scaledDeltaLeft;
+          y = (parseFloat(y) || 0) + scaledDeltaTop;
 
           Object.assign(event.target.style, {
-            width: event.rect.width + 'px',
-            height: event.rect.height + 'px',
+            width: scaledWidth + 'px',
+            height: scaledHeight + 'px',
             transform: `translate(${x}px, ${y}px)`
           });
 
@@ -330,7 +302,7 @@ function makeDraggable(target) {
       },
       modifiers: [
         interact.modifiers.restrictSize({
-          min: { width: 200, height: 150 }
+          min: { width: 200 / scale, height: 150 / scale }
         })
       ]
     })
@@ -383,18 +355,9 @@ urlInput.addEventListener('blur', () => {
 
 // Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (selectedTile && document.activeElement !== urlInput) {
-      e.preventDefault();
-      removeTile(selectedTile);
-    }
-  } else if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
+  if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     addTileBtn.click();
-  } else if (e.key === 'r' && (e.ctrlKey || e.metaKey) && selectedTile) {
-    e.preventDefault();
-    const webview = selectedTile.querySelector('webview');
-    if (webview) webview.reload();
   }
 });
 

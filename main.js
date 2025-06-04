@@ -26,18 +26,6 @@ app.whenReady().then(() => {
   win.loadFile('index.html');
 });
 
-// Handle screenshot capture
-ipcMain.handle('grab', async (_event, id) => {
-  const wc = webContents.fromId(id);
-  if (!wc) return null;
-  try {
-    const image = await wc.capturePage();
-    return image.toDataURL();   // PNG -> data URL
-  } catch (error) {
-    console.error('Screenshot capture failed:', error);
-    return null;
-  }
-});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
