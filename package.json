@@ -1,0 +1,24 @@
+{
+  "name": "aicanvas",
+  "version": "1.0.0",
+  "description": "Infinite canvas web browser with draggable, resizable tiles",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": [
+    "electron",
+    "canvas",
+    "browser",
+    "infinite"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  },
+  "dependencies": {
+    "interactjs": "^1.10.27"
+  }
+}
