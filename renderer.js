@@ -12,6 +12,39 @@ let dragging = false;
 let selectedTile = null;
 let tileCounter = 0;
 
+// Persistence functions
+function saveTileState() {
+  const tiles = [];
+  document.querySelectorAll('.tile').forEach(tile => {
+    const webview = tile.querySelector('webview');
+    if (webview) {
+      tiles.push({
+        id: tile.dataset.id,
+        url: webview.src,
+        x: parseFloat(tile.dataset.x) || 0,
+        y: parseFloat(tile.dataset.y) || 0,
+        width: tile.offsetWidth,
+        height: tile.offsetHeight,
+        left: parseFloat(tile.style.left) || 0,
+        top: parseFloat(tile.style.top) || 0
+      });
+    }
+  });
+  localStorage.setItem('aicanvas-tiles', JSON.stringify(tiles));
+}
+
+function loadTileState() {
+  const saved = localStorage.getItem('aicanvas-tiles');
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to parse saved tiles:', e);
+    }
+  }
+  return null;
+}
+
 // Pan & zoom controls
 viewport.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -61,19 +94,33 @@ function updateZoomIndicator() {
 }
 
 // Tile management
-function addTile(url, x = 0, y = 0) {
+function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null) {
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = 'https://' + url;
   }
   
-  const tileId = ++tileCounter;
+  const tileId = savedData ? savedData.id : ++tileCounter;
+  if (savedData && parseInt(savedData.id) > tileCounter) {
+    tileCounter = parseInt(savedData.id);
+  }
+  
   const tile = document.createElement('div');
   tile.className = 'tile';
+  tile.style.width = width + 'px';
+  tile.style.height = height + 'px';
   tile.style.left = x + 'px';
   tile.style.top = y + 'px';
-  tile.dataset.x = '0';
-  tile.dataset.y = '0';
   tile.dataset.id = tileId;
+  
+  // Restore saved position if available
+  if (savedData) {
+    tile.dataset.x = savedData.x.toString();
+    tile.dataset.y = savedData.y.toString();
+    tile.style.transform = `translate(${savedData.x}px, ${savedData.y}px)`;
+  } else {
+    tile.dataset.x = '0';
+    tile.dataset.y = '0';
+  }
   
   // Create header
   const header = document.createElement('div');
@@ -221,6 +268,11 @@ function addTile(url, x = 0, y = 0) {
   makeDraggable(tile);
   selectTile(tile);
   
+  // Save state after creating new tile (but not when loading saved tiles)
+  if (!savedData) {
+    saveTileState();
+  }
+  
   return tile;
 }
 
@@ -229,6 +281,7 @@ function removeTile(tile) {
     selectedTile = null;
   }
   tile.remove();
+  saveTileState(); // Save state after removal
 }
 
 function selectTile(tile) {
@@ -252,6 +305,9 @@ function makeDraggable(target) {
           target.style.transform = `translate(${x}px, ${y}px)`;
           target.setAttribute('data-x', x);
           target.setAttribute('data-y', y);
+        },
+        end() {
+          saveTileState(); // Save position after drag
         }
       }
     })
@@ -291,6 +347,8 @@ function makeDraggable(target) {
       webview.style.width = width + 'px';
       webview.style.height = height + 'px';
       webview.setAttribute('style', `width: ${width}px; height: ${height}px; position: absolute; top: 30px; left: 0;`);
+      
+      saveTileState(); // Save size after resize
     });
 }
 
@@ -340,11 +398,21 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// Initialize with demo tiles
+// Initialize with saved tiles or demo tiles
 setTimeout(() => {
-  addTile('https://news.ycombinator.com', 100, 100);
-  addTile('https://www.wikipedia.org', 700, 150);
-  addTile('https://github.com', 300, 500);
+  const savedTiles = loadTileState();
+  
+  if (savedTiles && savedTiles.length > 0) {
+    // Load saved tiles
+    savedTiles.forEach(tileData => {
+      addTile(tileData.url, tileData.left, tileData.top, tileData.width, tileData.height, tileData);
+    });
+  } else {
+    // Initialize with demo tiles if no saved state
+    addTile('https://news.ycombinator.com', 100, 100);
+    addTile('https://www.wikipedia.org', 700, 150);
+    addTile('https://github.com', 300, 500);
+  }
 }, 500);
 
 // Initialize zoom indicator
