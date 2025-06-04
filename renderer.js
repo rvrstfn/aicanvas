@@ -243,6 +243,7 @@ function makeDraggable(target) {
   interact(target)
     .draggable({
       inertia: false,
+      allowFrom: '.tile-header', // Only allow dragging from header
       listeners: {
         move(event) {
           const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
@@ -255,7 +256,7 @@ function makeDraggable(target) {
       }
     })
     .resizable({
-      edges: { left: true, right: true, bottom: true, top: true },
+      edges: { right: true, bottom: true }, // Only bottom-right corner
       listeners: {
         move(event) {
           let { x, y } = event.target.dataset;
