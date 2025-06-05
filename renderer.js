@@ -281,10 +281,13 @@ function makeDraggable(target) {
       edges: { right: true, bottom: true }, // Only bottom-right corner
       listeners: {
         move(event) {
-          // Only update size, not position for bottom-right corner resize
+          // Adjust resize dimensions for zoom scale
+          const scaledWidth = event.rect.width / scale;
+          const scaledHeight = event.rect.height / scale;
+          
           Object.assign(event.target.style, {
-            width: event.rect.width + 'px',
-            height: event.rect.height + 'px'
+            width: scaledWidth + 'px',
+            height: scaledHeight + 'px'
           });
         }
       },
