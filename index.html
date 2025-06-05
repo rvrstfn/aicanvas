@@ -65,10 +65,7 @@
       box-shadow: 0 0 0 3px rgba(0,122,255,0.3);
     }
     
-    .tile {
-      /* Make resize handles more visible */
-      position: relative;
-    }
+    /* Remove conflicting position rule - resize handle styling moved to ::after pseudo-element */
     
     .tile:hover::after {
       content: '';

@@ -281,28 +281,16 @@ function makeDraggable(target) {
       edges: { right: true, bottom: true }, // Only bottom-right corner
       listeners: {
         move(event) {
-          // Adjust for zoom scale
-          const scaledDeltaLeft = event.deltaRect.left / scale;
-          const scaledDeltaTop = event.deltaRect.top / scale;
-          const scaledWidth = event.rect.width / scale;
-          const scaledHeight = event.rect.height / scale;
-          
-          let { x, y } = event.target.dataset;
-          x = (parseFloat(x) || 0) + scaledDeltaLeft;
-          y = (parseFloat(y) || 0) + scaledDeltaTop;
-
+          // Only update size, not position for bottom-right corner resize
           Object.assign(event.target.style, {
-            width: scaledWidth + 'px',
-            height: scaledHeight + 'px',
-            transform: `translate(${x}px, ${y}px)`
+            width: event.rect.width + 'px',
+            height: event.rect.height + 'px'
           });
-
-          Object.assign(event.target.dataset, { x, y });
         }
       },
       modifiers: [
         interact.modifiers.restrictSize({
-          min: { width: 200 / scale, height: 150 / scale }
+          min: { width: 200, height: 150 }
         })
       ]
     })
