@@ -25,7 +25,8 @@ function saveTileState() {
         width: tile.offsetWidth,
         height: tile.offsetHeight,
         left: parseFloat(tile.style.left) || 0,
-        top: parseFloat(tile.style.top) || 0
+        top: parseFloat(tile.style.top) || 0,
+        unloaded: tile.dataset.unloaded === 'true'
       });
     }
   });
@@ -142,6 +143,15 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
     if (webview) webview.reload();
   };
   
+  const unloadBtn = document.createElement('button');
+  unloadBtn.className = 'tile-btn';
+  unloadBtn.innerHTML = '⊟';
+  unloadBtn.title = 'Unload page (save memory)';
+  unloadBtn.onclick = (e) => {
+    e.stopPropagation();
+    toggleTileLoad(tile);
+  };
+  
   const closeBtn = document.createElement('button');
   closeBtn.className = 'tile-btn';
   closeBtn.innerHTML = '×';
@@ -152,6 +162,7 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
   };
   
   controls.appendChild(reloadBtn);
+  controls.appendChild(unloadBtn);
   controls.appendChild(closeBtn);
   header.appendChild(urlDisplay);
   header.appendChild(controls);
@@ -230,6 +241,11 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
   world.appendChild(tile);
   makeDraggable(tile);
   
+  // Handle unloaded state if loading from saved data
+  if (savedData && savedData.unloaded) {
+    setTimeout(() => toggleTileLoad(tile), 100);
+  }
+  
   // Save state after creating new tile (but not when loading saved tiles)
   if (!savedData) {
     saveTileState();
@@ -244,6 +260,70 @@ function removeTile(tile) {
   }
   tile.remove();
   saveTileState(); // Save state after removal
+}
+
+function toggleTileLoad(tile) {
+  const webview = tile.querySelector('webview');
+  const placeholder = tile.querySelector('.tile-placeholder');
+  const unloadBtn = tile.querySelector('.tile-btn[title*="Unload"]');
+  
+  if (webview && webview.style.display !== 'none') {
+    // Unload: hide webview, show placeholder
+    const url = webview.src;
+    let title = url;
+    
+    // Try to get page title from webview
+    try {
+      webview.executeJavaScript('document.title').then(pageTitle => {
+        if (pageTitle && pageTitle.trim()) {
+          const titleElement = tile.querySelector('.placeholder-title');
+          if (titleElement) titleElement.textContent = pageTitle;
+        }
+      }).catch(() => {});
+    } catch (e) {}
+    
+    webview.style.display = 'none';
+    
+    // Create placeholder if it doesn't exist
+    if (!placeholder) {
+      const placeholderDiv = document.createElement('div');
+      placeholderDiv.className = 'tile-placeholder';
+      placeholderDiv.innerHTML = `
+        <div class="placeholder-content">
+          <div class="placeholder-icon">⊟</div>
+          <div class="placeholder-title">${title}</div>
+          <div class="placeholder-url">${url}</div>
+          <div class="placeholder-note">Click to reload</div>
+        </div>
+      `;
+      
+      placeholderDiv.onclick = () => toggleTileLoad(tile);
+      tile.appendChild(placeholderDiv);
+    } else {
+      placeholder.style.display = 'flex';
+    }
+    
+    unloadBtn.innerHTML = '⊞';
+    unloadBtn.title = 'Reload page';
+    tile.dataset.unloaded = 'true';
+    
+  } else {
+    // Reload: show webview, hide placeholder
+    if (webview) {
+      webview.style.display = 'block';
+      webview.reload();
+    }
+    
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+    
+    unloadBtn.innerHTML = '⊟';
+    unloadBtn.title = 'Unload page (save memory)';
+    delete tile.dataset.unloaded;
+  }
+  
+  saveTileState();
 }
 
 function selectTile(tile) {
