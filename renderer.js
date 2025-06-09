@@ -234,6 +234,24 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
   webview.addEventListener('did-fail-load', (event) => {
     console.error('❌ Webview failed to load:', url, event);
   });
+
+  webview.addEventListener('new-window', (event) => {
+    console.log('🔗 New window requested:', event.url);
+    event.preventDefault(); // Prevent default new window behavior
+    
+    // Create new tile for the link near the current tile
+    const sourceTile = tile;
+    const sourceRect = sourceTile.getBoundingClientRect();
+    const sourceX = parseFloat(sourceTile.style.left) + (parseFloat(sourceTile.dataset.x) || 0);
+    const sourceY = parseFloat(sourceTile.style.top) + (parseFloat(sourceTile.dataset.y) || 0);
+    
+    // Position new tile to the right and slightly down from source
+    const newX = sourceX + 520; // Tile width (500) + some spacing
+    const newY = sourceY + 50;   // Slight vertical offset
+    
+    // Create the new tile
+    addTile(event.url, newX, newY);
+  });
   
   console.log('Event listeners attached to webview');
   
