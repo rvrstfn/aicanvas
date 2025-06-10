@@ -236,32 +236,8 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
     console.error('❌ Webview failed to load:', url, event);
   });
 
-  // Handle new window requests (both old and new Electron event names)
-  const handleNewWindow = (event, eventType) => {
-    console.log(`🔗 ${eventType} event fired:`, event);
-    const targetUrl = event.url || event.newURL || event.target?.src;
-    
-    if (targetUrl) {
-      event.preventDefault(); // Prevent default popup behavior
-      console.log('🔗 Creating new tile for:', targetUrl);
-      
-      // Create new tile for the link near the current tile
-      const sourceTile = tile;
-      const sourceX = parseFloat(sourceTile.style.left) + (parseFloat(sourceTile.dataset.x) || 0);
-      const sourceY = parseFloat(sourceTile.style.top) + (parseFloat(sourceTile.dataset.y) || 0);
-      
-      // Position new tile to the right and slightly down from source
-      const newX = sourceX + 520; // Tile width (500) + some spacing
-      const newY = sourceY + 50;   // Slight vertical offset
-      
-      // Create the new tile
-      addTile(targetUrl, newX, newY);
-    }
-  };
-
-  // Listen for both old and new event names for compatibility
-  webview.addEventListener('new-window', (event) => handleNewWindow(event, 'new-window'));
-  webview.addEventListener('did-create-window', (event) => handleNewWindow(event, 'did-create-window'));
+  // Note: New window handling is now done at the main process level
+  // via setWindowOpenHandler to prevent actual popups and create tiles instead
   
   console.log('Event listeners attached to webview');
   
@@ -492,3 +468,17 @@ setTimeout(() => {
 
 // Initialize zoom indicator
 updateZoomIndicator();
+
+// Listen for new tile creation requests from main process (popup URLs)
+if (window.electronAPI) {
+  window.electronAPI.onCreateNewTile((event, url) => {
+    console.log('🔗 Received create-new-tile request for:', url);
+    
+    // Find the center of the current viewport to place the new tile
+    const centerX = (-origin.x + viewport.clientWidth / 2) / scale - 250;
+    const centerY = (-origin.y + viewport.clientHeight / 2) / scale - 150;
+    
+    // Create the new tile at viewport center
+    addTile(url, centerX, centerY);
+  });
+}

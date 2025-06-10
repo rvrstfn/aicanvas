@@ -1,3 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// No bridge functions needed currently
+// Expose IPC functionality for creating new tiles from popup URLs
+contextBridge.exposeInMainWorld('electronAPI', {
+  onCreateNewTile: (callback) => ipcRenderer.on('create-new-tile', callback)
+});

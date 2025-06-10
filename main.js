@@ -23,6 +23,17 @@ app.whenReady().then(() => {
     });
   });
 
+  // Prevent webview popups from creating new BrowserWindows
+  // Instead, send the URL to the renderer to create a new tile
+  app.on('web-contents-created', (event, contents) => {
+    contents.setWindowOpenHandler(({ url }) => {
+      console.log('🔗 Popup blocked, sending URL to renderer:', url);
+      // Send the URL to the main window to create a new tile
+      win.webContents.send('create-new-tile', url);
+      return { action: 'deny' }; // Prevent popup window
+    });
+  });
+
   win.loadFile('index.html');
 });
 
