@@ -133,6 +133,18 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
   const controls = document.createElement('div');
   controls.className = 'tile-controls';
   
+  const backBtn = document.createElement('button');
+  backBtn.className = 'tile-btn';
+  backBtn.innerHTML = '←';
+  backBtn.title = 'Go back';
+  backBtn.onclick = (e) => {
+    e.stopPropagation();
+    const webview = tile.querySelector('webview');
+    if (webview && webview.canGoBack()) {
+      webview.goBack();
+    }
+  };
+  
   const reloadBtn = document.createElement('button');
   reloadBtn.className = 'tile-btn';
   reloadBtn.innerHTML = '↻';
@@ -161,6 +173,7 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
     removeTile(tile);
   };
   
+  controls.appendChild(backBtn);
   controls.appendChild(reloadBtn);
   controls.appendChild(unloadBtn);
   controls.appendChild(closeBtn);
