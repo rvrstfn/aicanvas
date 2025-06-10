@@ -170,6 +170,7 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
   // Create webview
   console.log('Creating webview for:', url);
   const webview = document.createElement('webview');
+  webview.setAttribute('allowpopups', ''); // Enable new-window events
   webview.src = url;
   webview.setAttribute('disableblinkfeatures', 'Auxclick');
   console.log('Webview created, src set to:', webview.src);
@@ -235,23 +236,32 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
     console.error('❌ Webview failed to load:', url, event);
   });
 
-  webview.addEventListener('new-window', (event) => {
-    console.log('🔗 New window requested:', event.url);
-    event.preventDefault(); // Prevent default new window behavior
+  // Handle new window requests (both old and new Electron event names)
+  const handleNewWindow = (event, eventType) => {
+    console.log(`🔗 ${eventType} event fired:`, event);
+    const targetUrl = event.url || event.newURL || event.target?.src;
     
-    // Create new tile for the link near the current tile
-    const sourceTile = tile;
-    const sourceRect = sourceTile.getBoundingClientRect();
-    const sourceX = parseFloat(sourceTile.style.left) + (parseFloat(sourceTile.dataset.x) || 0);
-    const sourceY = parseFloat(sourceTile.style.top) + (parseFloat(sourceTile.dataset.y) || 0);
-    
-    // Position new tile to the right and slightly down from source
-    const newX = sourceX + 520; // Tile width (500) + some spacing
-    const newY = sourceY + 50;   // Slight vertical offset
-    
-    // Create the new tile
-    addTile(event.url, newX, newY);
-  });
+    if (targetUrl) {
+      event.preventDefault(); // Prevent default popup behavior
+      console.log('🔗 Creating new tile for:', targetUrl);
+      
+      // Create new tile for the link near the current tile
+      const sourceTile = tile;
+      const sourceX = parseFloat(sourceTile.style.left) + (parseFloat(sourceTile.dataset.x) || 0);
+      const sourceY = parseFloat(sourceTile.style.top) + (parseFloat(sourceTile.dataset.y) || 0);
+      
+      // Position new tile to the right and slightly down from source
+      const newX = sourceX + 520; // Tile width (500) + some spacing
+      const newY = sourceY + 50;   // Slight vertical offset
+      
+      // Create the new tile
+      addTile(targetUrl, newX, newY);
+    }
+  };
+
+  // Listen for both old and new event names for compatibility
+  webview.addEventListener('new-window', (event) => handleNewWindow(event, 'new-window'));
+  webview.addEventListener('did-create-window', (event) => handleNewWindow(event, 'did-create-window'));
   
   console.log('Event listeners attached to webview');
   
@@ -450,6 +460,16 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+// Function to fix existing webviews missing allowpopups attribute
+function fixExistingWebviews() {
+  document.querySelectorAll('.tile webview').forEach(webview => {
+    if (!webview.hasAttribute('allowpopups')) {
+      console.log('🔧 Adding allowpopups to existing webview:', webview.src);
+      webview.setAttribute('allowpopups', '');
+    }
+  });
+}
+
 // Initialize with saved tiles or demo tiles
 setTimeout(() => {
   const savedTiles = loadTileState();
@@ -459,6 +479,9 @@ setTimeout(() => {
     savedTiles.forEach(tileData => {
       addTile(tileData.url, tileData.left, tileData.top, tileData.width, tileData.height, tileData);
     });
+    
+    // Fix any existing webviews that might be missing allowpopups
+    setTimeout(fixExistingWebviews, 1000);
   } else {
     // Initialize with demo tiles if no saved state
     addTile('https://news.ycombinator.com', 100, 100);
