@@ -251,6 +251,101 @@
       opacity: 0.6;
       font-style: italic;
     }
+    
+    /* Minimap Styles */
+    .minimap {
+      position: fixed;
+      top: 30px;
+      right: 30px;
+      width: 200px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      z-index: 1000;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: all 0.3s ease;
+    }
+    
+    .minimap.collapsed .minimap-content {
+      display: none;
+    }
+    
+    .minimap-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: rgba(240, 240, 240, 0.8);
+      border-bottom: 1px solid #ddd;
+      border-radius: 8px 8px 0 0;
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+    }
+    
+    .minimap-title {
+      user-select: none;
+    }
+    
+    .minimap-toggle {
+      width: 16px;
+      height: 16px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: bold;
+      color: #666;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 2px;
+    }
+    
+    .minimap-toggle:hover {
+      background: rgba(0,0,0,0.1);
+    }
+    
+    .minimap-content {
+      position: relative;
+      padding: 10px;
+      height: 120px;
+    }
+    
+    #minimapCanvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 4px;
+      background: #f8f9fa;
+      cursor: pointer;
+      display: block;
+    }
+    
+    .minimap-viewport {
+      position: absolute;
+      border: 2px solid #007AFF;
+      background: rgba(0, 122, 255, 0.1);
+      pointer-events: none;
+      border-radius: 2px;
+      transition: all 0.1s ease;
+    }
+    
+    /* Minimap tile hover tooltip */
+    .minimap-tooltip {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      pointer-events: none;
+      z-index: 1001;
+      white-space: nowrap;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   </style>
 </head>
 <body>
@@ -261,6 +356,18 @@
   <input type="text" id="urlInput" class="url-input" placeholder="Enter URL and press Enter...">
   <button id="addTileBtn" class="add-tile-btn">+</button>
   <div id="zoomIndicator" class="zoom-indicator">100%</div>
+  
+  <!-- Minimap -->
+  <div id="minimap" class="minimap">
+    <div class="minimap-header">
+      <span class="minimap-title">Map</span>
+      <button id="minimapToggle" class="minimap-toggle">−</button>
+    </div>
+    <div class="minimap-content">
+      <canvas id="minimapCanvas" width="180" height="120"></canvas>
+      <div id="minimapViewport" class="minimap-viewport"></div>
+    </div>
+  </div>
   
   <script src="renderer.js"></script>
 </body>

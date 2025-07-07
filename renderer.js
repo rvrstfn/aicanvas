@@ -87,6 +87,7 @@ window.addEventListener('mousemove', (e) => {
 
 function updateWorldTransform() {
   world.style.transform = `translate(${origin.x}px, ${origin.y}px) scale(${scale})`;
+  updateMinimap(); // Update minimap when canvas moves/zooms
 }
 
 function updateZoomIndicator() {
@@ -268,6 +269,9 @@ function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null)
     saveTileState();
   }
   
+  // Update minimap when new tile is added
+  updateMinimap();
+  
   return tile;
 }
 
@@ -277,6 +281,7 @@ function removeTile(tile) {
   }
   tile.remove();
   saveTileState(); // Save state after removal
+  updateMinimap(); // Update minimap after tile removal
 }
 
 function toggleTileLoad(tile) {
@@ -341,6 +346,7 @@ function toggleTileLoad(tile) {
   }
   
   saveTileState();
+  updateMinimap(); // Update minimap after load/unload
 }
 
 function selectTile(tile) {
@@ -371,6 +377,7 @@ function makeDraggable(target) {
         },
         end() {
           saveTileState(); // Save position after drag
+          updateMinimap(); // Update minimap after tile move
         }
       }
     })
@@ -409,6 +416,7 @@ function makeDraggable(target) {
       webview.setAttribute('style', `width: ${width}px; height: ${height}px; position: absolute; top: 30px; left: 0;`);
       
       saveTileState(); // Save size after resize
+      updateMinimap(); // Update minimap after tile resize
     });
 }
 
@@ -447,6 +455,13 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     addTileBtn.click();
   }
+  
+  // Toggle minimap with 'M' key
+  if (e.key === 'm' || e.key === 'M') {
+    e.preventDefault();
+    const minimapToggle = document.getElementById('minimapToggle');
+    if (minimapToggle) minimapToggle.click();
+  }
 });
 
 // Function to fix existing webviews missing allowpopups attribute
@@ -481,6 +496,320 @@ setTimeout(() => {
 
 // Initialize zoom indicator
 updateZoomIndicator();
+
+// Minimap functionality
+let minimapCanvas, minimapCtx, minimapViewport, minimapBounds = null;
+let minimapUpdateScheduled = false;
+
+function initializeMinimap() {
+  minimapCanvas = document.getElementById('minimapCanvas');
+  minimapCtx = minimapCanvas.getContext('2d');
+  minimapViewport = document.getElementById('minimapViewport');
+  
+  // Set actual canvas resolution for crisp rendering
+  const rect = minimapCanvas.getBoundingClientRect();
+  minimapCanvas.width = rect.width * window.devicePixelRatio;
+  minimapCanvas.height = rect.height * window.devicePixelRatio;
+  minimapCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  
+  updateMinimap();
+}
+
+function calculateMinimapBounds() {
+  const tiles = document.querySelectorAll('.tile');
+  if (tiles.length === 0) {
+    return { minX: -500, minY: -300, maxX: 500, maxY: 300, width: 1000, height: 600 };
+  }
+  
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  
+  tiles.forEach(tile => {
+    const tileX = parseFloat(tile.style.left) + (parseFloat(tile.dataset.x) || 0);
+    const tileY = parseFloat(tile.style.top) + (parseFloat(tile.dataset.y) || 0);
+    const tileWidth = tile.offsetWidth;
+    const tileHeight = tile.offsetHeight;
+    
+    minX = Math.min(minX, tileX);
+    minY = Math.min(minY, tileY);
+    maxX = Math.max(maxX, tileX + tileWidth);
+    maxY = Math.max(maxY, tileY + tileHeight);
+  });
+  
+  // Add padding around content
+  const padding = 200;
+  minX -= padding;
+  minY -= padding;
+  maxX += padding;
+  maxY += padding;
+  
+  return {
+    minX, minY, maxX, maxY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
+
+function updateMinimap() {
+  if (!minimapCanvas || minimapUpdateScheduled) return;
+  
+  minimapUpdateScheduled = true;
+  requestAnimationFrame(() => {
+    minimapUpdateScheduled = false;
+    renderMinimap();
+  });
+}
+
+function renderMinimap() {
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  
+  // Calculate bounds and scale
+  minimapBounds = calculateMinimapBounds();
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some margin
+  
+  // Clear canvas
+  minimapCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+  
+  // Calculate center offset
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Draw tiles
+  const tiles = document.querySelectorAll('.tile');
+  tiles.forEach(tile => {
+    const tileX = parseFloat(tile.style.left) + (parseFloat(tile.dataset.x) || 0);
+    const tileY = parseFloat(tile.style.top) + (parseFloat(tile.dataset.y) || 0);
+    const tileWidth = tile.offsetWidth;
+    const tileHeight = tile.offsetHeight;
+    const isUnloaded = tile.dataset.unloaded === 'true';
+    
+    // Convert world coordinates to minimap coordinates
+    const minimapX = centerX + (tileX - worldCenterX) * minimapScale;
+    const minimapY = centerY + (tileY - worldCenterY) * minimapScale;
+    const minimapW = tileWidth * minimapScale;
+    const minimapH = tileHeight * minimapScale;
+    
+    // Draw tile rectangle
+    minimapCtx.fillStyle = isUnloaded ? 'rgba(200, 200, 200, 0.6)' : 'rgba(100, 150, 255, 0.7)';
+    minimapCtx.fillRect(minimapX, minimapY, minimapW, minimapH);
+    
+    minimapCtx.strokeStyle = isUnloaded ? '#999' : '#333';
+    minimapCtx.lineWidth = 0.5;
+    minimapCtx.strokeRect(minimapX, minimapY, minimapW, minimapH);
+  });
+  
+  // Update viewport indicator
+  updateMinimapViewport();
+}
+
+function updateMinimapViewport() {
+  if (!minimapBounds || !minimapViewport) return;
+  
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9;
+  
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Calculate current viewport in world coordinates
+  const viewportWidth = viewport.clientWidth / scale;
+  const viewportHeight = viewport.clientHeight / scale;
+  const viewportX = -origin.x / scale;
+  const viewportY = -origin.y / scale;
+  
+  // Convert to minimap coordinates
+  const minimapViewportX = centerX + (viewportX - worldCenterX) * minimapScale;
+  const minimapViewportY = centerY + (viewportY - worldCenterY) * minimapScale;
+  const minimapViewportW = viewportWidth * minimapScale;
+  const minimapViewportH = viewportHeight * minimapScale;
+  
+  // Position the viewport indicator
+  minimapViewport.style.left = `${10 + minimapViewportX}px`;
+  minimapViewport.style.top = `${10 + minimapViewportY}px`;
+  minimapViewport.style.width = `${minimapViewportW}px`;
+  minimapViewport.style.height = `${minimapViewportH}px`;
+}
+
+function handleMinimapClick(event) {
+  if (!minimapBounds) return;
+  
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  const clickX = event.clientX - rect.left;
+  const clickY = event.clientY - rect.top;
+  
+  // Calculate minimap scale and center
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9;
+  
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Convert minimap coordinates to world coordinates
+  const worldX = worldCenterX + (clickX - centerX) / minimapScale;
+  const worldY = worldCenterY + (clickY - centerY) / minimapScale;
+  
+  // Navigate to clicked position (center the viewport on the clicked point)
+  navigateToPosition(worldX, worldY);
+}
+
+function navigateToPosition(worldX, worldY, smooth = true) {
+  const targetOriginX = -(worldX * scale) + viewport.clientWidth / 2;
+  const targetOriginY = -(worldY * scale) + viewport.clientHeight / 2;
+  
+  if (smooth) {
+    // Smooth animation to new position
+    animateToPosition(targetOriginX, targetOriginY);
+  } else {
+    origin.x = targetOriginX;
+    origin.y = targetOriginY;
+    updateWorldTransform();
+    updateMinimap();
+  }
+}
+
+function animateToPosition(targetX, targetY) {
+  const startX = origin.x;
+  const startY = origin.y;
+  const deltaX = targetX - startX;
+  const deltaY = targetY - startY;
+  const duration = 300; // ms
+  const startTime = Date.now();
+  
+  function animate() {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Easing function (ease-out)
+    const easeProgress = 1 - Math.pow(1 - progress, 3);
+    
+    origin.x = startX + deltaX * easeProgress;
+    origin.y = startY + deltaY * easeProgress;
+    
+    updateWorldTransform();
+    updateMinimap();
+    
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    }
+  }
+  
+  animate();
+}
+
+// Minimap hover effects and tooltips
+let minimapTooltip = null;
+
+function handleMinimapHover(event) {
+  if (!minimapBounds) return;
+  
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  const mouseX = event.clientX - rect.left;
+  const mouseY = event.clientY - rect.top;
+  
+  // Calculate minimap scale and center
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9;
+  
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Check if mouse is over any tile
+  const tiles = document.querySelectorAll('.tile');
+  let hoveredTile = null;
+  
+  for (const tile of tiles) {
+    const tileX = parseFloat(tile.style.left) + (parseFloat(tile.dataset.x) || 0);
+    const tileY = parseFloat(tile.style.top) + (parseFloat(tile.dataset.y) || 0);
+    const tileWidth = tile.offsetWidth;
+    const tileHeight = tile.offsetHeight;
+    
+    // Convert to minimap coordinates
+    const minimapX = centerX + (tileX - worldCenterX) * minimapScale;
+    const minimapY = centerY + (tileY - worldCenterY) * minimapScale;
+    const minimapW = tileWidth * minimapScale;
+    const minimapH = tileHeight * minimapScale;
+    
+    // Check if mouse is inside this tile's rectangle
+    if (mouseX >= minimapX && mouseX <= minimapX + minimapW &&
+        mouseY >= minimapY && mouseY <= minimapY + minimapH) {
+      hoveredTile = tile;
+      break;
+    }
+  }
+  
+  if (hoveredTile) {
+    showMinimapTooltip(event, hoveredTile);
+    minimapCanvas.style.cursor = 'pointer';
+  } else {
+    hideMinimapTooltip();
+    minimapCanvas.style.cursor = 'pointer';
+  }
+}
+
+function showMinimapTooltip(event, tile) {
+  const webview = tile.querySelector('webview');
+  if (!webview) return;
+  
+  const url = webview.src;
+  const isUnloaded = tile.dataset.unloaded === 'true';
+  
+  if (!minimapTooltip) {
+    minimapTooltip = document.createElement('div');
+    minimapTooltip.className = 'minimap-tooltip';
+    document.body.appendChild(minimapTooltip);
+  }
+  
+  minimapTooltip.textContent = `${isUnloaded ? '[Unloaded] ' : ''}${url}`;
+  minimapTooltip.style.display = 'block';
+  minimapTooltip.style.left = `${event.clientX + 10}px`;
+  minimapTooltip.style.top = `${event.clientY - 30}px`;
+}
+
+function hideMinimapTooltip() {
+  if (minimapTooltip) {
+    minimapTooltip.style.display = 'none';
+  }
+}
+
+// Initialize minimap when DOM is ready
+setTimeout(() => {
+  initializeMinimap();
+  
+  // Add event listeners for minimap functionality
+  minimapCanvas.addEventListener('click', handleMinimapClick);
+  minimapCanvas.addEventListener('mousemove', handleMinimapHover);
+  minimapCanvas.addEventListener('mouseleave', hideMinimapTooltip);
+  
+  // Add minimap toggle functionality
+  const minimapToggle = document.getElementById('minimapToggle');
+  minimapToggle.addEventListener('click', () => {
+    const minimap = document.getElementById('minimap');
+    minimap.classList.toggle('collapsed');
+    minimapToggle.textContent = minimap.classList.contains('collapsed') ? '+' : '−';
+  });
+}, 600);
 
 // Listen for new tile creation requests from main process (popup URLs)
 if (window.electronAPI) {
