@@ -1,4 +1,3 @@
-const { grabScreenshot } = window.bridge;
 const world = document.getElementById('world');
 const viewport = document.getElementById('viewport');
 const urlInput = document.getElementById('urlInput');
@@ -11,6 +10,40 @@ let origin = { x: 0, y: 0 };
 let dragging = false;
 let selectedTile = null;
 let tileCounter = 0;
+
+// Persistence functions
+function saveTileState() {
+  const tiles = [];
+  document.querySelectorAll('.tile').forEach(tile => {
+    const webview = tile.querySelector('webview');
+    if (webview) {
+      tiles.push({
+        id: tile.dataset.id,
+        url: webview.src,
+        x: parseFloat(tile.dataset.x) || 0,
+        y: parseFloat(tile.dataset.y) || 0,
+        width: tile.offsetWidth,
+        height: tile.offsetHeight,
+        left: parseFloat(tile.style.left) || 0,
+        top: parseFloat(tile.style.top) || 0,
+        unloaded: tile.dataset.unloaded === 'true'
+      });
+    }
+  });
+  localStorage.setItem('aicanvas-tiles', JSON.stringify(tiles));
+}
+
+function loadTileState() {
+  const saved = localStorage.getItem('aicanvas-tiles');
+  if (saved) {
+    try {
+      return JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to parse saved tiles:', e);
+    }
+  }
+  return null;
+}
 
 // Pan & zoom controls
 viewport.addEventListener('wheel', (e) => {
@@ -54,6 +87,7 @@ window.addEventListener('mousemove', (e) => {
 
 function updateWorldTransform() {
   world.style.transform = `translate(${origin.x}px, ${origin.y}px) scale(${scale})`;
+  updateMinimap(); // Update minimap when canvas moves/zooms
 }
 
 function updateZoomIndicator() {
@@ -61,19 +95,33 @@ function updateZoomIndicator() {
 }
 
 // Tile management
-function addTile(url, x = 0, y = 0) {
+function addTile(url, x = 0, y = 0, width = 500, height = 300, savedData = null) {
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = 'https://' + url;
   }
   
-  const tileId = ++tileCounter;
+  const tileId = savedData ? savedData.id : ++tileCounter;
+  if (savedData && parseInt(savedData.id) > tileCounter) {
+    tileCounter = parseInt(savedData.id);
+  }
+  
   const tile = document.createElement('div');
   tile.className = 'tile';
+  tile.style.width = width + 'px';
+  tile.style.height = height + 'px';
   tile.style.left = x + 'px';
   tile.style.top = y + 'px';
-  tile.dataset.x = '0';
-  tile.dataset.y = '0';
   tile.dataset.id = tileId;
+  
+  // Restore saved position if available
+  if (savedData) {
+    tile.dataset.x = savedData.x.toString();
+    tile.dataset.y = savedData.y.toString();
+    tile.style.transform = `translate(${savedData.x}px, ${savedData.y}px)`;
+  } else {
+    tile.dataset.x = '0';
+    tile.dataset.y = '0';
+  }
   
   // Create header
   const header = document.createElement('div');
@@ -86,6 +134,18 @@ function addTile(url, x = 0, y = 0) {
   const controls = document.createElement('div');
   controls.className = 'tile-controls';
   
+  const backBtn = document.createElement('button');
+  backBtn.className = 'tile-btn';
+  backBtn.innerHTML = '←';
+  backBtn.title = 'Go back';
+  backBtn.onclick = (e) => {
+    e.stopPropagation();
+    const webview = tile.querySelector('webview');
+    if (webview && webview.canGoBack()) {
+      webview.goBack();
+    }
+  };
+  
   const reloadBtn = document.createElement('button');
   reloadBtn.className = 'tile-btn';
   reloadBtn.innerHTML = '↻';
@@ -94,6 +154,15 @@ function addTile(url, x = 0, y = 0) {
     e.stopPropagation();
     const webview = tile.querySelector('webview');
     if (webview) webview.reload();
+  };
+  
+  const unloadBtn = document.createElement('button');
+  unloadBtn.className = 'tile-btn';
+  unloadBtn.innerHTML = '⊟';
+  unloadBtn.title = 'Unload page (save memory)';
+  unloadBtn.onclick = (e) => {
+    e.stopPropagation();
+    toggleTileLoad(tile);
   };
   
   const closeBtn = document.createElement('button');
@@ -105,7 +174,9 @@ function addTile(url, x = 0, y = 0) {
     removeTile(tile);
   };
   
+  controls.appendChild(backBtn);
   controls.appendChild(reloadBtn);
+  controls.appendChild(unloadBtn);
   controls.appendChild(closeBtn);
   header.appendChild(urlDisplay);
   header.appendChild(controls);
@@ -113,6 +184,7 @@ function addTile(url, x = 0, y = 0) {
   // Create webview
   console.log('Creating webview for:', url);
   const webview = document.createElement('webview');
+  webview.setAttribute('allowpopups', ''); // Enable new-window events
   webview.src = url;
   webview.setAttribute('disableblinkfeatures', 'Auxclick');
   console.log('Webview created, src set to:', webview.src);
@@ -127,13 +199,8 @@ function addTile(url, x = 0, y = 0) {
     webview.setAttribute('style', `width: ${width}px; height: ${height}px; position: absolute; top: 30px; left: 0;`);
   };
   
-  // Create screenshot image
-  const screenshot = document.createElement('img');
-  screenshot.style.display = 'none';
-  
   tile.appendChild(header);
   tile.appendChild(webview);
-  tile.appendChild(screenshot);
   
   // Set initial dimensions
   setTimeout(updateWebviewDimensions, 0);
@@ -182,44 +249,28 @@ function addTile(url, x = 0, y = 0) {
   webview.addEventListener('did-fail-load', (event) => {
     console.error('❌ Webview failed to load:', url, event);
   });
+
+  // Note: New window handling is now done at the main process level
+  // via setWindowOpenHandler to prevent actual popups and create tiles instead
   
   console.log('Event listeners attached to webview');
   
-  webview.addEventListener('focus', () => {
-    screenshot.style.display = 'none';
-    webview.style.display = 'block';
-    selectTile(tile);
-  });
-  
-  webview.addEventListener('blur', async () => {
-    try {
-      const webContentsId = webview.getWebContentsId();
-      const png = await grabScreenshot(webContentsId);
-      if (png) {
-        screenshot.src = png;
-        screenshot.style.display = 'block';
-        webview.style.display = 'none';
-      }
-    } catch (error) {
-      console.error('Screenshot failed:', error);
-    }
-  });
-  
-  // Add click handler for selection and webview focusing
-  tile.addEventListener('mousedown', (e) => {
-    if (e.target === tile || e.target === screenshot) {
-      selectTile(tile);
-      // Focus the webview to enable interaction
-      const webview = tile.querySelector('webview');
-      if (webview) {
-        webview.focus();
-      }
-    }
-  });
   
   world.appendChild(tile);
   makeDraggable(tile);
-  selectTile(tile);
+  
+  // Handle unloaded state if loading from saved data
+  if (savedData && savedData.unloaded) {
+    setTimeout(() => toggleTileLoad(tile), 100);
+  }
+  
+  // Save state after creating new tile (but not when loading saved tiles)
+  if (!savedData) {
+    saveTileState();
+  }
+  
+  // Update minimap when new tile is added
+  updateMinimap();
   
   return tile;
 }
@@ -229,6 +280,73 @@ function removeTile(tile) {
     selectedTile = null;
   }
   tile.remove();
+  saveTileState(); // Save state after removal
+  updateMinimap(); // Update minimap after tile removal
+}
+
+function toggleTileLoad(tile) {
+  const webview = tile.querySelector('webview');
+  const placeholder = tile.querySelector('.tile-placeholder');
+  const unloadBtn = tile.querySelector('.tile-btn[title*="Unload"]');
+  
+  if (webview && webview.style.display !== 'none') {
+    // Unload: hide webview, show placeholder
+    const url = webview.src;
+    let title = url;
+    
+    // Try to get page title from webview
+    try {
+      webview.executeJavaScript('document.title').then(pageTitle => {
+        if (pageTitle && pageTitle.trim()) {
+          const titleElement = tile.querySelector('.placeholder-title');
+          if (titleElement) titleElement.textContent = pageTitle;
+        }
+      }).catch(() => {});
+    } catch (e) {}
+    
+    webview.style.display = 'none';
+    
+    // Create placeholder if it doesn't exist
+    if (!placeholder) {
+      const placeholderDiv = document.createElement('div');
+      placeholderDiv.className = 'tile-placeholder';
+      placeholderDiv.innerHTML = `
+        <div class="placeholder-content">
+          <div class="placeholder-icon">⊟</div>
+          <div class="placeholder-title">${title}</div>
+          <div class="placeholder-url">${url}</div>
+          <div class="placeholder-note">Click to reload</div>
+        </div>
+      `;
+      
+      placeholderDiv.onclick = () => toggleTileLoad(tile);
+      tile.appendChild(placeholderDiv);
+    } else {
+      placeholder.style.display = 'flex';
+    }
+    
+    unloadBtn.innerHTML = '⊞';
+    unloadBtn.title = 'Reload page';
+    tile.dataset.unloaded = 'true';
+    
+  } else {
+    // Reload: show webview, hide placeholder
+    if (webview) {
+      webview.style.display = 'block';
+      webview.reload();
+    }
+    
+    if (placeholder) {
+      placeholder.style.display = 'none';
+    }
+    
+    unloadBtn.innerHTML = '⊟';
+    unloadBtn.title = 'Unload page (save memory)';
+    delete tile.dataset.unloaded;
+  }
+  
+  saveTileState();
+  updateMinimap(); // Update minimap after load/unload
 }
 
 function selectTile(tile) {
@@ -246,12 +364,20 @@ function makeDraggable(target) {
       allowFrom: '.tile-header', // Only allow dragging from header
       listeners: {
         move(event) {
-          const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
-          const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+          // Adjust for zoom scale
+          const scaledDx = event.dx / scale;
+          const scaledDy = event.dy / scale;
+          
+          const x = (parseFloat(target.getAttribute('data-x')) || 0) + scaledDx;
+          const y = (parseFloat(target.getAttribute('data-y')) || 0) + scaledDy;
           
           target.style.transform = `translate(${x}px, ${y}px)`;
           target.setAttribute('data-x', x);
           target.setAttribute('data-y', y);
+        },
+        end() {
+          saveTileState(); // Save position after drag
+          updateMinimap(); // Update minimap after tile move
         }
       }
     })
@@ -259,17 +385,14 @@ function makeDraggable(target) {
       edges: { right: true, bottom: true }, // Only bottom-right corner
       listeners: {
         move(event) {
-          let { x, y } = event.target.dataset;
-          x = (parseFloat(x) || 0) + event.deltaRect.left;
-          y = (parseFloat(y) || 0) + event.deltaRect.top;
-
+          // Adjust resize dimensions for zoom scale
+          const scaledWidth = event.rect.width / scale;
+          const scaledHeight = event.rect.height / scale;
+          
           Object.assign(event.target.style, {
-            width: event.rect.width + 'px',
-            height: event.rect.height + 'px',
-            transform: `translate(${x}px, ${y}px)`
+            width: scaledWidth + 'px',
+            height: scaledHeight + 'px'
           });
-
-          Object.assign(event.target.dataset, { x, y });
         }
       },
       modifiers: [
@@ -291,6 +414,9 @@ function makeDraggable(target) {
       webview.style.width = width + 'px';
       webview.style.height = height + 'px';
       webview.setAttribute('style', `width: ${width}px; height: ${height}px; position: absolute; top: 30px; left: 0;`);
+      
+      saveTileState(); // Save size after resize
+      updateMinimap(); // Update minimap after tile resize
     });
 }
 
@@ -325,27 +451,376 @@ urlInput.addEventListener('blur', () => {
 
 // Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (selectedTile && document.activeElement !== urlInput) {
-      e.preventDefault();
-      removeTile(selectedTile);
-    }
-  } else if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
+  if (e.key === 'n' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
     addTileBtn.click();
-  } else if (e.key === 'r' && (e.ctrlKey || e.metaKey) && selectedTile) {
+  }
+  
+  // Toggle minimap with 'M' key
+  if (e.key === 'm' || e.key === 'M') {
     e.preventDefault();
-    const webview = selectedTile.querySelector('webview');
-    if (webview) webview.reload();
+    const minimapToggle = document.getElementById('minimapToggle');
+    if (minimapToggle) minimapToggle.click();
   }
 });
 
-// Initialize with demo tiles
+// Function to fix existing webviews missing allowpopups attribute
+function fixExistingWebviews() {
+  document.querySelectorAll('.tile webview').forEach(webview => {
+    if (!webview.hasAttribute('allowpopups')) {
+      console.log('🔧 Adding allowpopups to existing webview:', webview.src);
+      webview.setAttribute('allowpopups', '');
+    }
+  });
+}
+
+// Initialize with saved tiles or demo tiles
 setTimeout(() => {
-  addTile('https://news.ycombinator.com', 100, 100);
-  addTile('https://www.wikipedia.org', 700, 150);
-  addTile('https://github.com', 300, 500);
+  const savedTiles = loadTileState();
+  
+  if (savedTiles && savedTiles.length > 0) {
+    // Load saved tiles
+    savedTiles.forEach(tileData => {
+      addTile(tileData.url, tileData.left, tileData.top, tileData.width, tileData.height, tileData);
+    });
+    
+    // Fix any existing webviews that might be missing allowpopups
+    setTimeout(fixExistingWebviews, 1000);
+  } else {
+    // Initialize with demo tiles if no saved state
+    addTile('https://news.ycombinator.com', 100, 100);
+    addTile('https://www.wikipedia.org', 700, 150);
+    addTile('https://github.com', 300, 500);
+  }
 }, 500);
 
 // Initialize zoom indicator
 updateZoomIndicator();
+
+// Minimap functionality
+let minimapCanvas, minimapCtx, minimapViewport, minimapBounds = null;
+let minimapUpdateScheduled = false;
+
+function initializeMinimap() {
+  minimapCanvas = document.getElementById('minimapCanvas');
+  minimapCtx = minimapCanvas.getContext('2d');
+  minimapViewport = document.getElementById('minimapViewport');
+  
+  // Set actual canvas resolution for crisp rendering
+  const rect = minimapCanvas.getBoundingClientRect();
+  minimapCanvas.width = rect.width * window.devicePixelRatio;
+  minimapCanvas.height = rect.height * window.devicePixelRatio;
+  minimapCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  
+  updateMinimap();
+}
+
+function calculateMinimapBounds() {
+  const tiles = document.querySelectorAll('.tile');
+  if (tiles.length === 0) {
+    return { minX: -500, minY: -300, maxX: 500, maxY: 300, width: 1000, height: 600 };
+  }
+  
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  
+  tiles.forEach(tile => {
+    const tileX = parseFloat(tile.style.left) + (parseFloat(tile.dataset.x) || 0);
+    const tileY = parseFloat(tile.style.top) + (parseFloat(tile.dataset.y) || 0);
+    const tileWidth = tile.offsetWidth;
+    const tileHeight = tile.offsetHeight;
+    
+    minX = Math.min(minX, tileX);
+    minY = Math.min(minY, tileY);
+    maxX = Math.max(maxX, tileX + tileWidth);
+    maxY = Math.max(maxY, tileY + tileHeight);
+  });
+  
+  // Add padding around content
+  const padding = 200;
+  minX -= padding;
+  minY -= padding;
+  maxX += padding;
+  maxY += padding;
+  
+  return {
+    minX, minY, maxX, maxY,
+    width: maxX - minX,
+    height: maxY - minY
+  };
+}
+
+function updateMinimap() {
+  if (!minimapCanvas || minimapUpdateScheduled) return;
+  
+  minimapUpdateScheduled = true;
+  requestAnimationFrame(() => {
+    minimapUpdateScheduled = false;
+    renderMinimap();
+  });
+}
+
+function renderMinimap() {
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  
+  // Calculate bounds and scale
+  minimapBounds = calculateMinimapBounds();
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9; // 90% to leave some margin
+  
+  // Clear canvas
+  minimapCtx.clearRect(0, 0, canvasWidth, canvasHeight);
+  
+  // Calculate center offset
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Draw tiles
+  const tiles = document.querySelectorAll('.tile');
+  tiles.forEach(tile => {
+    const tileX = parseFloat(tile.style.left) + (parseFloat(tile.dataset.x) || 0);
+    const tileY = parseFloat(tile.style.top) + (parseFloat(tile.dataset.y) || 0);
+    const tileWidth = tile.offsetWidth;
+    const tileHeight = tile.offsetHeight;
+    const isUnloaded = tile.dataset.unloaded === 'true';
+    
+    // Convert world coordinates to minimap coordinates
+    const minimapX = centerX + (tileX - worldCenterX) * minimapScale;
+    const minimapY = centerY + (tileY - worldCenterY) * minimapScale;
+    const minimapW = tileWidth * minimapScale;
+    const minimapH = tileHeight * minimapScale;
+    
+    // Draw tile rectangle
+    minimapCtx.fillStyle = isUnloaded ? 'rgba(200, 200, 200, 0.6)' : 'rgba(100, 150, 255, 0.7)';
+    minimapCtx.fillRect(minimapX, minimapY, minimapW, minimapH);
+    
+    minimapCtx.strokeStyle = isUnloaded ? '#999' : '#333';
+    minimapCtx.lineWidth = 0.5;
+    minimapCtx.strokeRect(minimapX, minimapY, minimapW, minimapH);
+  });
+  
+  // Update viewport indicator
+  updateMinimapViewport();
+}
+
+function updateMinimapViewport() {
+  if (!minimapBounds || !minimapViewport) return;
+  
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9;
+  
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Calculate current viewport in world coordinates
+  const viewportWidth = viewport.clientWidth / scale;
+  const viewportHeight = viewport.clientHeight / scale;
+  const viewportX = -origin.x / scale;
+  const viewportY = -origin.y / scale;
+  
+  // Convert to minimap coordinates
+  const minimapViewportX = centerX + (viewportX - worldCenterX) * minimapScale;
+  const minimapViewportY = centerY + (viewportY - worldCenterY) * minimapScale;
+  const minimapViewportW = viewportWidth * minimapScale;
+  const minimapViewportH = viewportHeight * minimapScale;
+  
+  // Position the viewport indicator
+  minimapViewport.style.left = `${10 + minimapViewportX}px`;
+  minimapViewport.style.top = `${10 + minimapViewportY}px`;
+  minimapViewport.style.width = `${minimapViewportW}px`;
+  minimapViewport.style.height = `${minimapViewportH}px`;
+}
+
+function handleMinimapClick(event) {
+  if (!minimapBounds) return;
+  
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  const clickX = event.clientX - rect.left;
+  const clickY = event.clientY - rect.top;
+  
+  // Calculate minimap scale and center
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9;
+  
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Convert minimap coordinates to world coordinates
+  const worldX = worldCenterX + (clickX - centerX) / minimapScale;
+  const worldY = worldCenterY + (clickY - centerY) / minimapScale;
+  
+  // Navigate to clicked position (center the viewport on the clicked point)
+  navigateToPosition(worldX, worldY);
+}
+
+function navigateToPosition(worldX, worldY, smooth = true) {
+  const targetOriginX = -(worldX * scale) + viewport.clientWidth / 2;
+  const targetOriginY = -(worldY * scale) + viewport.clientHeight / 2;
+  
+  if (smooth) {
+    // Smooth animation to new position
+    animateToPosition(targetOriginX, targetOriginY);
+  } else {
+    origin.x = targetOriginX;
+    origin.y = targetOriginY;
+    updateWorldTransform();
+    updateMinimap();
+  }
+}
+
+function animateToPosition(targetX, targetY) {
+  const startX = origin.x;
+  const startY = origin.y;
+  const deltaX = targetX - startX;
+  const deltaY = targetY - startY;
+  const duration = 300; // ms
+  const startTime = Date.now();
+  
+  function animate() {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    
+    // Easing function (ease-out)
+    const easeProgress = 1 - Math.pow(1 - progress, 3);
+    
+    origin.x = startX + deltaX * easeProgress;
+    origin.y = startY + deltaY * easeProgress;
+    
+    updateWorldTransform();
+    updateMinimap();
+    
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    }
+  }
+  
+  animate();
+}
+
+// Minimap hover effects and tooltips
+let minimapTooltip = null;
+
+function handleMinimapHover(event) {
+  if (!minimapBounds) return;
+  
+  const rect = minimapCanvas.getBoundingClientRect();
+  const canvasWidth = rect.width;
+  const canvasHeight = rect.height;
+  const mouseX = event.clientX - rect.left;
+  const mouseY = event.clientY - rect.top;
+  
+  // Calculate minimap scale and center
+  const scaleX = canvasWidth / minimapBounds.width;
+  const scaleY = canvasHeight / minimapBounds.height;
+  const minimapScale = Math.min(scaleX, scaleY) * 0.9;
+  
+  const centerX = canvasWidth / 2;
+  const centerY = canvasHeight / 2;
+  const worldCenterX = minimapBounds.minX + minimapBounds.width / 2;
+  const worldCenterY = minimapBounds.minY + minimapBounds.height / 2;
+  
+  // Check if mouse is over any tile
+  const tiles = document.querySelectorAll('.tile');
+  let hoveredTile = null;
+  
+  for (const tile of tiles) {
+    const tileX = parseFloat(tile.style.left) + (parseFloat(tile.dataset.x) || 0);
+    const tileY = parseFloat(tile.style.top) + (parseFloat(tile.dataset.y) || 0);
+    const tileWidth = tile.offsetWidth;
+    const tileHeight = tile.offsetHeight;
+    
+    // Convert to minimap coordinates
+    const minimapX = centerX + (tileX - worldCenterX) * minimapScale;
+    const minimapY = centerY + (tileY - worldCenterY) * minimapScale;
+    const minimapW = tileWidth * minimapScale;
+    const minimapH = tileHeight * minimapScale;
+    
+    // Check if mouse is inside this tile's rectangle
+    if (mouseX >= minimapX && mouseX <= minimapX + minimapW &&
+        mouseY >= minimapY && mouseY <= minimapY + minimapH) {
+      hoveredTile = tile;
+      break;
+    }
+  }
+  
+  if (hoveredTile) {
+    showMinimapTooltip(event, hoveredTile);
+    minimapCanvas.style.cursor = 'pointer';
+  } else {
+    hideMinimapTooltip();
+    minimapCanvas.style.cursor = 'pointer';
+  }
+}
+
+function showMinimapTooltip(event, tile) {
+  const webview = tile.querySelector('webview');
+  if (!webview) return;
+  
+  const url = webview.src;
+  const isUnloaded = tile.dataset.unloaded === 'true';
+  
+  if (!minimapTooltip) {
+    minimapTooltip = document.createElement('div');
+    minimapTooltip.className = 'minimap-tooltip';
+    document.body.appendChild(minimapTooltip);
+  }
+  
+  minimapTooltip.textContent = `${isUnloaded ? '[Unloaded] ' : ''}${url}`;
+  minimapTooltip.style.display = 'block';
+  minimapTooltip.style.left = `${event.clientX + 10}px`;
+  minimapTooltip.style.top = `${event.clientY - 30}px`;
+}
+
+function hideMinimapTooltip() {
+  if (minimapTooltip) {
+    minimapTooltip.style.display = 'none';
+  }
+}
+
+// Initialize minimap when DOM is ready
+setTimeout(() => {
+  initializeMinimap();
+  
+  // Add event listeners for minimap functionality
+  minimapCanvas.addEventListener('click', handleMinimapClick);
+  minimapCanvas.addEventListener('mousemove', handleMinimapHover);
+  minimapCanvas.addEventListener('mouseleave', hideMinimapTooltip);
+  
+  // Add minimap toggle functionality
+  const minimapToggle = document.getElementById('minimapToggle');
+  minimapToggle.addEventListener('click', () => {
+    const minimap = document.getElementById('minimap');
+    minimap.classList.toggle('collapsed');
+    minimapToggle.textContent = minimap.classList.contains('collapsed') ? '+' : '−';
+  });
+}, 600);
+
+// Listen for new tile creation requests from main process (popup URLs)
+if (window.electronAPI) {
+  window.electronAPI.onCreateNewTile((event, url) => {
+    console.log('🔗 Received create-new-tile request for:', url);
+    
+    // Find the center of the current viewport to place the new tile
+    const centerX = (-origin.x + viewport.clientWidth / 2) / scale - 250;
+    const centerY = (-origin.y + viewport.clientHeight / 2) / scale - 150;
+    
+    // Create the new tile at viewport center
+    addTile(url, centerX, centerY);
+  });
+}
